@@ -109,7 +109,7 @@ ROSTER = {
     "thanos": {
         "name": "Thanos (The Mad Titan)",
         "universe": "Marvel Comics",
-        "local_img": "assets/thanos.jpg",
+        "local_img": "assets/thanos.png",
         "remote_img": "https://upload.wikimedia.org/wikipedia/en/c/cd/Thanos_Infinity_4.png",
         "publisher": "Marvel", "sex": "Male Characters", "identity": "Public Identity",
         "alive": "Deceased Characters", "eye": "Red Eyes", "hair": "No Hair",
