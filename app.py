@@ -129,7 +129,7 @@ ROSTER = {
 CLASSES = ['Bad Characters', 'Good Characters', 'Neutral Characters']
 
 # ---------------------------------------------------------
-# Neural Network with Bounded Feature Representation
+# Deep Neural Network Architecture
 # ---------------------------------------------------------
 class DeepVillainNet(nn.Module):
     def __init__(self, in_features, num_classes=3):
@@ -154,7 +154,7 @@ class DeepVillainNet(nn.Module):
         return self.out(h3)
 
 # ---------------------------------------------------------
-# Feature Pipeline with Bounded Appearance Compression
+# Preprocessing Engine
 # ---------------------------------------------------------
 def prepare_features(df):
     def tidy(col, keep):
@@ -173,15 +173,15 @@ def prepare_features(df):
 
     X = pd.get_dummies(raw, dtype=float)
 
-    # 1. Bounded Appearance via Tanh Compression (Stops +4.5σ Outliers)
     apps = df['APPEARANCES'].fillna(1).values
     X['app_bounded'] = np.tanh(np.log1p(apps) / 3.0)
-
-    # 2. Key Comic Domain Interaction Features
+    
+    # Comic domain flags
     hair_series = df['HAIR'].fillna('').astype(str)
     eye_series = df['EYE'].fillna('').astype(str)
     id_series = df['ID'].fillna('').astype(str)
 
+    X['feat_flagship_hero'] = (apps > 2500).astype(float)
     X['feat_green_hair'] = (hair_series == 'Green Hair').astype(float)
     X['feat_red_yellow_eye'] = eye_series.isin(['Red Eyes', 'Yellow Eyes']).astype(float)
     X['feat_grey_white_pub'] = ((hair_series == 'White Hair') & (id_series == 'Public Identity')).astype(float)
@@ -192,7 +192,7 @@ def prepare_features(df):
     return X, median_year
 
 # ---------------------------------------------------------
-# Model Training Engine
+# Training Engine
 # ---------------------------------------------------------
 @st.cache_resource(show_spinner="Training Calibrated Deep Neural Network...")
 def load_and_train():
@@ -226,8 +226,8 @@ def load_and_train():
     torch.manual_seed(42)
     model = DeepVillainNet(in_features=len(feature_cols))
 
-    # Weight balancing: offsets majority bias (Neutral boosted to 3.2, Bad to 1.8)
-    weights = torch.tensor([1.8, 0.7, 3.2], dtype=torch.float32)
+    # Balanced class weights: avoids penalizing Good Characters while retaining Neutral/Bad sensitivity
+    weights = torch.tensor([1.35, 1.15, 2.3], dtype=torch.float32)
     loss_fn = nn.CrossEntropyLoss(weight=weights)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.005, weight_decay=1e-4)
 
@@ -357,6 +357,7 @@ with col_right:
         input_df['year_norm'] = (year - 1935.0) / 80.0
 
         # 2. Key Domain Interaction Flags
+        input_df['feat_flagship_hero'] = 1.0 if appearances > 2500 else 0.0
         input_df['feat_green_hair'] = 1.0 if hair == 'Green Hair' else 0.0
         input_df['feat_red_yellow_eye'] = 1.0 if eye in ['Red Eyes', 'Yellow Eyes'] else 0.0
         input_df['feat_grey_white_pub'] = 1.0 if (hair == 'White Hair' and identity == 'Public Identity') else 0.0
@@ -442,7 +443,7 @@ with col_right:
         st.info("Select a challenger above, review their stats, and click **⚡ Run Neural Net Prediction**.")
 
 # ---------------------------------------------------------
-# Arena Scorecard
+# Arena Scorecard (Fixed Metric Layout)
 # ---------------------------------------------------------
 if st.session_state.arena_tests:
     st.write("---")
@@ -454,7 +455,7 @@ if st.session_state.arena_tests:
 
     m1, m2, m3 = st.columns(3)
     m1.metric("Characters Tested", total_tests)
-    m1.metric("Correct Predictions", correct_tests)
+    m2.metric("Correct Predictions", correct_tests)
     m3.metric("Arena Accuracy", f"{accuracy:.1f}%")
 
     st.dataframe(test_df, use_container_width=True, hide_index=True)
