@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 
@@ -49,20 +50,42 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Model Definition & Data Engine
+# Upgraded Deep Neural Net Architecture
 # ---------------------------------------------------------
-class VillainNet(nn.Module):
-    def __init__(self):
+class EnhancedVillainNet(nn.Module):
+    def __init__(self, in_features=26, num_classes=3):
         super().__init__()
-        self.hidden = nn.Linear(26, 32)
-        self.output = nn.Linear(32, 3)
+        self.net = nn.Sequential(
+            # Block 1: 26 -> 128
+            nn.Linear(in_features, 128),
+            nn.BatchNorm1d(128),
+            nn.LeakyReLU(0.1),
+            nn.Dropout(0.25),
+            
+            # Block 2: 128 -> 64
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.LeakyReLU(0.1),
+            nn.Dropout(0.2),
+            
+            # Block 3: 64 -> 32
+            nn.Linear(64, 32),
+            nn.BatchNorm1d(32),
+            nn.LeakyReLU(0.1),
+            
+            # Classification Head: 32 -> 3
+            nn.Linear(32, num_classes)
+        )
 
     def forward(self, x):
-        return self.output(torch.relu(self.hidden(x)))
+        return self.net(x)
 
 CLASSES = ['Bad Characters', 'Good Characters', 'Neutral Characters']
 
-@st.cache_resource(show_spinner="Training VillainNet neural network...")
+# ---------------------------------------------------------
+# Data Engine & Mini-Batch Training Loop
+# ---------------------------------------------------------
+@st.cache_resource(show_spinner="Training Deep Neural Network (BatchNorm + Dropout)...")
 def load_and_train():
     dc = pd.read_csv("dc-wikia-data.csv")
     ml = pd.read_csv("marvel-wikia-data.csv")
@@ -107,24 +130,35 @@ def load_and_train():
     X_val_t = torch.tensor(X_val_scaled, dtype=torch.float32)
     y_val_t = torch.tensor(y_val.values, dtype=torch.long)
 
+    train_dataset = TensorDataset(X_train_t, y_train_t)
+    train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True)
+
     torch.manual_seed(42)
-    model = VillainNet()
+    model = EnhancedVillainNet(in_features=len(feature_cols))
+
     counts = torch.bincount(y_train_t).float()
     weights = counts.sum() / (3 * counts)
     loss_fn = nn.CrossEntropyLoss(weight=weights)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.003, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
 
-    best_val, best_state, patience, bad = float('inf'), None, 50, 0
-    for _ in range(1000):
+    best_val, best_state, patience, bad = float('inf'), None, 25, 0
+
+    for epoch in range(120):
         model.train()
-        loss = loss_fn(model(X_train_t), y_train_t)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        for batch_x, batch_y in train_loader:
+            optimizer.zero_grad()
+            out = model(batch_x)
+            loss = loss_fn(out, batch_y)
+            loss.backward()
+            optimizer.step()
 
         model.eval()
         with torch.no_grad():
             val_loss = loss_fn(model(X_val_t), y_val_t).item()
+        
+        scheduler.step(val_loss)
+
         if val_loss < best_val:
             best_val = val_loss
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -144,18 +178,15 @@ if "history" not in st.session_state:
 try:
     model, scaler, feature_cols, median_year = load_and_train()
 except Exception as e:
-    st.error(f"Dataset loading error: {e}. Ensure `dc-wikia-data.csv` and `marvel-wikia-data.csv` are in your root folder.")
+    st.error(f"Dataset error: {e}. Ensure `dc-wikia-data.csv` and `marvel-wikia-data.csv` exist in the directory.")
     st.stop()
 
 # ---------------------------------------------------------
-# App Header
+# App Interface
 # ---------------------------------------------------------
 st.markdown('<div class="main-header">⚡ VILLAIN-NET ANALYZER</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Deep Learning Character Alignment Predictor & Classification Engine</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Deep Multilayer Perceptron (PyTorch) • BatchNorm • Dropout Regularized</div>', unsafe_allow_html=True)
 
-# ---------------------------------------------------------
-# Layout Grid with Form Submit (No reactive / live reruns)
-# ---------------------------------------------------------
 col_left, col_right = st.columns([1.1, 1.3], gap="large")
 
 with col_left:
@@ -176,7 +207,7 @@ with col_left:
         predict_btn = st.form_submit_button("⚡ Classify Alignment", type="primary", use_container_width=True)
 
 # ---------------------------------------------------------
-# Explicit Prediction Execution
+# Inference Pipeline
 # ---------------------------------------------------------
 with col_right:
     st.markdown("### 📊 Classification Output")
@@ -200,6 +231,7 @@ with col_right:
         scaled = scaler.transform(input_df)
         tensor_input = torch.tensor(scaled, dtype=torch.float32)
 
+        model.eval()
         with torch.no_grad():
             logits = model(tensor_input)
             probs = torch.softmax(logits, dim=1).numpy()[0]
