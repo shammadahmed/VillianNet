@@ -8,8 +8,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 
 st.set_page_config(
-    page_title="VillainNet | Comic Character Alignment AI",
-    page_icon="⚡",
+    page_title="VillainNet Arena | Neural Net Challenge",
+    page_icon="🥊",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -35,13 +35,29 @@ st.markdown("""
         font-size: 0.95rem;
         margin-bottom: 1.5rem;
     }
+    .verdict-box {
+        border-radius: 10px;
+        padding: 16px;
+        margin-top: 10px;
+        font-weight: 600;
+        text-align: center;
+    }
+    .correct {
+        background-color: rgba(34, 197, 94, 0.15);
+        border: 2px solid #22c55e;
+        color: #4ade80;
+    }
+    .incorrect {
+        background-color: rgba(239, 68, 68, 0.15);
+        border: 2px solid #ef4444;
+        color: #f87171;
+    }
     .stat-badge {
         display: inline-block;
         padding: 6px 14px;
         border-radius: 9999px;
         font-weight: 700;
         font-size: 0.85rem;
-        letter-spacing: 0.5px;
     }
     .badge-bad { background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid #ef4444; }
     .badge-good { background: rgba(34, 197, 94, 0.18); color: #4ade80; border: 1px solid #22c55e; }
@@ -50,30 +66,55 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Upgraded Deep Neural Net Architecture
+# Preset Non-Dataset / Third-Party Characters
+# ---------------------------------------------------------
+PRESET_CHARACTERS = {
+    "-- Select a Preset Character or Build Custom --": None,
+    "Homelander (The Boys / Dynamite)": {
+        "publisher": "Marvel", "sex": "Male Characters", "identity": "Public Identity",
+        "alive": "Living Characters", "eye": "Blue Eyes", "hair": "Blonde Hair",
+        "appearances": 72, "year": 2006, "actual_align": "Bad Characters"
+    },
+    "Invincible / Mark Grayson (Image Comics)": {
+        "publisher": "Marvel", "sex": "Male Characters", "identity": "Secret Identity",
+        "alive": "Living Characters", "eye": "Blue Eyes", "hair": "Black Hair",
+        "appearances": 144, "year": 2003, "actual_align": "Good Characters"
+    },
+    "Spawn / Al Simmons (Image Comics)": {
+        "publisher": "DC", "sex": "Male Characters", "identity": "Secret Identity",
+        "alive": "Deceased Characters", "eye": "Green Eyes", "hair": "Other",
+        "appearances": 350, "year": 1992, "actual_align": "Neutral Characters"
+    },
+    "Hellboy (Dark Horse)": {
+        "publisher": "DC", "sex": "Male Characters", "identity": "Public Identity",
+        "alive": "Living Characters", "eye": "Red Eyes", "hair": "Black Hair",
+        "appearances": 120, "year": 1993, "actual_align": "Good Characters"
+    },
+    "Omni-Man / Nolan Grayson (Image Comics)": {
+        "publisher": "Marvel", "sex": "Male Characters", "identity": "Public Identity",
+        "alive": "Living Characters", "eye": "Brown Eyes", "hair": "Black Hair",
+        "appearances": 95, "year": 2003, "actual_align": "Neutral Characters"
+    }
+}
+
+# ---------------------------------------------------------
+# Neural Network Architecture
 # ---------------------------------------------------------
 class EnhancedVillainNet(nn.Module):
     def __init__(self, in_features=26, num_classes=3):
         super().__init__()
         self.net = nn.Sequential(
-            # Block 1: 26 -> 128
             nn.Linear(in_features, 128),
             nn.BatchNorm1d(128),
             nn.LeakyReLU(0.1),
             nn.Dropout(0.25),
-            
-            # Block 2: 128 -> 64
             nn.Linear(128, 64),
             nn.BatchNorm1d(64),
             nn.LeakyReLU(0.1),
             nn.Dropout(0.2),
-            
-            # Block 3: 64 -> 32
             nn.Linear(64, 32),
             nn.BatchNorm1d(32),
             nn.LeakyReLU(0.1),
-            
-            # Classification Head: 32 -> 3
             nn.Linear(32, num_classes)
         )
 
@@ -83,9 +124,9 @@ class EnhancedVillainNet(nn.Module):
 CLASSES = ['Bad Characters', 'Good Characters', 'Neutral Characters']
 
 # ---------------------------------------------------------
-# Data Engine & Mini-Batch Training Loop
+# Data Engine & Training
 # ---------------------------------------------------------
-@st.cache_resource(show_spinner="Training Deep Neural Network (BatchNorm + Dropout)...")
+@st.cache_resource(show_spinner="Training PyTorch Neural Net on Comic Archives...")
 def load_and_train():
     dc = pd.read_csv("dc-wikia-data.csv")
     ml = pd.read_csv("marvel-wikia-data.csv")
@@ -130,8 +171,7 @@ def load_and_train():
     X_val_t = torch.tensor(X_val_scaled, dtype=torch.float32)
     y_val_t = torch.tensor(y_val.values, dtype=torch.long)
 
-    train_dataset = TensorDataset(X_train_t, y_train_t)
-    train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True)
+    train_loader = DataLoader(TensorDataset(X_train_t, y_train_t), batch_size=256, shuffle=True)
 
     torch.manual_seed(42)
     model = EnhancedVillainNet(in_features=len(feature_cols))
@@ -140,79 +180,110 @@ def load_and_train():
     weights = counts.sum() / (3 * counts)
     loss_fn = nn.CrossEntropyLoss(weight=weights)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.003, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
 
-    best_val, best_state, patience, bad = float('inf'), None, 25, 0
-
-    for epoch in range(120):
+    best_val, best_state = float('inf'), None
+    for _ in range(80):
         model.train()
-        for batch_x, batch_y in train_loader:
+        for bx, by in train_loader:
             optimizer.zero_grad()
-            out = model(batch_x)
-            loss = loss_fn(out, batch_y)
+            loss = loss_fn(model(bx), by)
             loss.backward()
             optimizer.step()
 
         model.eval()
         with torch.no_grad():
-            val_loss = loss_fn(model(X_val_t), y_val_t).item()
-        
-        scheduler.step(val_loss)
-
-        if val_loss < best_val:
-            best_val = val_loss
+            vloss = loss_fn(model(X_val_t), y_val_t).item()
+        if vloss < best_val:
+            best_val = vloss
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-            bad = 0
-        else:
-            bad += 1
-            if bad >= patience:
-                break
 
     model.load_state_dict(best_state)
     model.eval()
     return model, scaler, feature_cols, median_year
 
-if "history" not in st.session_state:
-    st.session_state.history = []
+# Session state tracking for accuracy game
+if "arena_tests" not in st.session_state:
+    st.session_state.arena_tests = []
 
 try:
     model, scaler, feature_cols, median_year = load_and_train()
 except Exception as e:
-    st.error(f"Dataset error: {e}. Ensure `dc-wikia-data.csv` and `marvel-wikia-data.csv` exist in the directory.")
+    st.error(f"Dataset error: {e}. Place `dc-wikia-data.csv` and `marvel-wikia-data.csv` in the directory.")
     st.stop()
 
 # ---------------------------------------------------------
 # App Interface
 # ---------------------------------------------------------
-st.markdown('<div class="main-header">⚡ VILLAIN-NET ANALYZER</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Deep Multilayer Perceptron (PyTorch) • BatchNorm • Dropout Regularized</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">🥊 VILLAIN-NET ARENA: TEST THE AI</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Feed external, custom, or crossover characters to see if the neural network correctly determines their alignment.</div>', unsafe_allow_html=True)
 
-col_left, col_right = st.columns([1.1, 1.3], gap="large")
+# Preset Selector
+selected_preset = st.selectbox("🎯 Quick Load an External Character:", list(PRESET_CHARACTERS.keys()))
+default_vals = PRESET_CHARACTERS.get(selected_preset) or {
+    "name": "Omni-Man",
+    "publisher": "Marvel",
+    "sex": "Male Characters",
+    "identity": "Secret Identity",
+    "alive": "Living Characters",
+    "eye": "Blue Eyes",
+    "hair": "Black Hair",
+    "appearances": 50,
+    "year": 2000,
+    "actual_align": "Good Characters"
+}
 
-with col_left:
-    st.markdown("### 🧬 Character Profile")
-    with st.form("character_form"):
+col_form, col_arena = st.columns([1.1, 1.2], gap="large")
+
+with col_form:
+    st.markdown("### 📋 Character Input & Ground Truth")
+    with st.form("challenger_form"):
+        char_name = st.text_input("Character Name", value=selected_preset.split(" (")[0] if default_vals else "Invincible")
+        
+        c_align1, c_align2 = st.columns(2)
+        with c_align1:
+            actual_alignment = st.selectbox(
+                "Known True Alignment (Ground Truth)",
+                CLASSES,
+                index=CLASSES.index(default_vals.get("actual_align", "Good Characters"))
+            )
+        with c_align2:
+            publisher = st.radio(
+                "Closest Universe Style",
+                ["DC", "Marvel"],
+                index=0 if default_vals.get("publisher") == "DC" else 1,
+                horizontal=True
+            )
+
         c1, c2 = st.columns(2)
         with c1:
-            publisher = st.radio("Publisher", ["DC", "Marvel"], horizontal=True)
-            sex = st.selectbox("Sex", ["Male Characters", "Female Characters", "Other"])
-            identity = st.selectbox("Identity Type", ["Secret Identity", "Public Identity", "No Dual Identity", "Other"])
-            alive = st.selectbox("Vital Status", ["Living Characters", "Deceased Characters", "Other"])
+            sex_opts = ["Male Characters", "Female Characters", "Other"]
+            sex = st.selectbox("Sex", sex_opts, index=sex_opts.index(default_vals.get("sex", "Male Characters")))
+            
+            id_opts = ["Secret Identity", "Public Identity", "No Dual Identity", "Other"]
+            identity = st.selectbox("Identity Type", id_opts, index=id_opts.index(default_vals.get("identity", "Secret Identity")))
+            
+            alive_opts = ["Living Characters", "Deceased Characters", "Other"]
+            alive = st.selectbox("Vital Status", alive_opts, index=alive_opts.index(default_vals.get("alive", "Living Characters")))
+
         with c2:
-            eye = st.selectbox("Eye Color", ["Blue Eyes", "Brown Eyes", "Black Eyes", "Green Eyes", "Red Eyes", "Other"])
-            hair = st.selectbox("Hair Color", ["Black Hair", "Brown Hair", "Blonde Hair", "Red Hair", "White Hair", "Other"])
-            appearances = st.number_input("Comic Appearances", min_value=1, max_value=6000, value=50, step=5)
-            year = st.slider("First Debuted (Year)", min_value=1935, max_value=2026, value=int(median_year))
+            eye_opts = ["Blue Eyes", "Brown Eyes", "Black Eyes", "Green Eyes", "Red Eyes", "Other"]
+            eye = st.selectbox("Eye Color", eye_opts, index=eye_opts.index(default_vals.get("eye", "Blue Eyes")))
+            
+            hair_opts = ["Black Hair", "Brown Hair", "Blonde Hair", "Red Hair", "White Hair", "Other"]
+            hair = st.selectbox("Hair Color", hair_opts, index=hair_opts.index(default_vals.get("hair", "Black Hair")))
+            
+            appearances = st.number_input("Comic Appearances Count", min_value=1, max_value=6000, value=int(default_vals.get("appearances", 50)))
+            year = st.slider("Debut Year", 1935, 2026, int(default_vals.get("year", 2000)))
 
-        predict_btn = st.form_submit_button("⚡ Classify Alignment", type="primary", use_container_width=True)
+        submit_btn = st.form_submit_button("⚡ Run Neural Net Prediction", type="primary", use_container_width=True)
 
 # ---------------------------------------------------------
-# Inference Pipeline
+# Evaluation & Ground-Truth Verification
 # ---------------------------------------------------------
-with col_right:
-    st.markdown("### 📊 Classification Output")
-    
-    if predict_btn:
+with col_arena:
+    st.markdown("### 🎯 Model Evaluation")
+
+    if submit_btn:
         clean_sex = sex.replace(" Characters", "")
         clean_id = identity.replace(" Identity", "")
         clean_alive = alive.replace(" Characters", "")
@@ -237,56 +308,70 @@ with col_right:
             probs = torch.softmax(logits, dim=1).numpy()[0]
             pred_idx = int(torch.argmax(logits, dim=1).item())
 
-        pred_class = CLASSES[pred_idx]
-        badge_type = "badge-bad" if "Bad" in pred_class else ("badge-good" if "Good" in pred_class else "badge-neutral")
+        predicted_class = CLASSES[pred_idx]
+        is_correct = (predicted_class == actual_alignment)
 
-        st.session_state.history.insert(0, {
-            "Publisher": publisher,
-            "Debuted": year,
-            "Appearances": appearances,
-            "Predicted": pred_class,
-            "Confidence": f"{probs[pred_idx] * 100:.1f}%"
+        # Log round in state
+        st.session_state.arena_tests.insert(0, {
+            "Character": char_name,
+            "Actual": actual_alignment,
+            "Predicted": predicted_class,
+            "Confidence": f"{probs[pred_idx]*100:.1f}%",
+            "Result": "✅ Correct" if is_correct else "❌ Missed"
         })
 
         with st.container(border=True):
-            st.markdown(f"""
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <span style="font-size:0.85rem; color:#8b949e; text-transform:uppercase;">Model Verdict</span>
-                        <h2 style="margin:4px 0 0 0;">{pred_class}</h2>
-                    </div>
-                    <div class="stat-badge {badge_type}">{probs[pred_idx]*100:.1f}% Confidence</div>
+            if is_correct:
+                st.markdown(f"""
+                <div class="verdict-box correct">
+                    🎉 CORRECT PREDICTION!<br>
+                    The neural net recognized <b>{char_name}</b> as <u>{predicted_class}</u>.
                 </div>
-                <hr style="border-color:#30363d; margin: 15px 0;">
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class="verdict-box incorrect">
+                    ❌ INCORRECT VERDICT!<br>
+                    Expected <b>{actual_alignment}</b>, but model predicted <b>{predicted_class}</b>.
+                </div>
+                """, unsafe_allow_html=True)
 
-            st.caption("Probability Distribution")
+            st.write("")
+            st.caption("Class Probability Distribution")
             for label, prob in zip(CLASSES, probs):
-                col_label, col_bar, col_pct = st.columns([1.2, 3, 0.8])
-                with col_label:
+                c_lbl, c_bar, c_val = st.columns([1.3, 3, 0.8])
+                with c_lbl:
                     st.write(f"**{label.split()[0]}**")
-                with col_bar:
+                with c_bar:
                     st.progress(float(prob))
-                with col_pct:
+                with c_val:
                     st.write(f"{prob * 100:.1f}%")
     else:
-        st.info("Adjust the attributes in the profile form and click **⚡ Classify Alignment** to run the prediction.")
+        st.info("Select or build an external character, state their known alignment, and click **⚡ Run Neural Net Prediction**.")
 
 # ---------------------------------------------------------
-# Prediction Log & Export
+# Scorecard & Session Tracking
 # ---------------------------------------------------------
-if st.session_state.history:
+if st.session_state.arena_tests:
     st.write("---")
-    c_hist1, c_hist2 = st.columns([3, 1])
-    with c_hist1:
-        st.markdown("#### 📜 Session Prediction History")
-    with c_hist2:
-        hist_df = pd.DataFrame(st.session_state.history)
-        st.download_button(
-            label="📥 Export Predictions to CSV",
-            data=hist_df.to_csv(index=False).encode('utf-8'),
-            file_name="character_alignment_predictions.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-    st.dataframe(hist_df, use_container_width=True, hide_index=True)
+    st.markdown("### 🏆 Arena Scorecard")
+    
+    test_df = pd.DataFrame(st.session_state.arena_tests)
+    total_tests = len(test_df)
+    correct_tests = len(test_df[test_df["Result"] == "✅ Correct"])
+    arena_accuracy = (correct_tests / total_tests) * 100
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total Challengers Tested", total_tests)
+    m2.metric("Model Hits", correct_tests)
+    m3.metric("Arena Accuracy", f"{arena_accuracy:.1f}%")
+
+    st.dataframe(test_df, use_container_width=True, hide_index=True)
+
+    csv_data = test_df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Export Arena Results (CSV)",
+        data=csv_data,
+        file_name="model_arena_evaluation.csv",
+        mime="text/csv"
+    )
