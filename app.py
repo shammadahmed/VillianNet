@@ -7,7 +7,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 
 st.set_page_config(
-    page_title="VillainNet Arena | Comic Character Alignment AI",
+    page_title="VillainNet Arena | Character Alignment AI",
     page_icon="🥊",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -62,101 +62,83 @@ st.markdown("""
     .badge-good { background: rgba(34, 197, 94, 0.18); color: #4ade80; border: 1px solid #22c55e; }
     .badge-neutral { background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid #f59e0b; }
 
-    .hero-card {
+    .character-card {
         background: #161b22;
-        border: 1px solid #30363d;
+        border: 2px solid #30363d;
         border-radius: 12px;
-        padding: 10px;
+        padding: 8px;
         text-align: center;
-        transition: transform 0.2s, border-color 0.2s;
+        margin-bottom: 6px;
     }
-    .hero-card:hover {
-        border-color: #58a6ff;
-        transform: translateY(-2px);
-    }
-    .hero-img {
-        width: 100%;
-        height: 140px;
-        object-fit: cover;
-        border-radius: 8px;
-        margin-bottom: 8px;
+    .character-card.active {
+        border-color: #ff4b4b;
+        box-shadow: 0 0 10px rgba(255, 75, 75, 0.4);
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Verified Character Roster (Accurate Dataset Attributes + Permanent Art)
+# Real Character Image Roster (Wikimedia Commons Direct CDNs)
 # ---------------------------------------------------------
 ROSTER = {
-    "spiderman": {
-        "name": "Spider-Man (Peter Parker)",
-        "universe": "Marvel Comics",
-        "img": "https://cdn.jsdelivr.net/gh/shammadahmed/assets@main/spiderman.jpg",
-        "fallback_svg": "🕷️",
-        "publisher": "Marvel", "sex": "Male Characters", "identity": "Secret Identity",
-        "alive": "Living Characters", "eye": "Hazel Eyes", "hair": "Brown Hair",
-        "appearances": 4043, "year": 1962, "actual_align": "Good Characters"
-    },
     "joker": {
         "name": "The Joker",
         "universe": "DC Comics",
-        "img": "https://cdn.jsdelivr.net/gh/shammadahmed/assets@main/joker.jpg",
-        "fallback_svg": "🃏",
-        "publisher": "DC", "sex": "Male Characters", "identity": "Secret Identity",
-        "alive": "Living Characters", "eye": "Green Eyes", "hair": "Green Hair",
+        "img": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/33/The_Joker_%2828723601127%29.jpg/360px-The_Joker_%2828723601127%29.jpg",
+        "publisher": "DC", "sex": "Male", "identity": "Secret",
+        "alive": "Living", "eye": "Green", "hair": "Green",
         "appearances": 519, "year": 1940, "actual_align": "Bad Characters"
     },
     "batman": {
         "name": "Batman (Bruce Wayne)",
         "universe": "DC Comics",
-        "img": "https://cdn.jsdelivr.net/gh/shammadahmed/assets@main/batman.jpg",
-        "fallback_svg": "🦇",
-        "publisher": "DC", "sex": "Male Characters", "identity": "Secret Identity",
-        "alive": "Living Characters", "eye": "Blue Eyes", "hair": "Black Hair",
+        "img": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/The_batman.jpg/360px-The_batman.jpg",
+        "publisher": "DC", "sex": "Male", "identity": "Secret",
+        "alive": "Living", "eye": "Blue", "hair": "Black",
         "appearances": 3098, "year": 1939, "actual_align": "Good Characters"
     },
-    "goblin": {
-        "name": "Green Goblin (Norman Osborn)",
+    "spiderman": {
+        "name": "Spider-Man (Peter Parker)",
         "universe": "Marvel Comics",
-        "img": "https://cdn.jsdelivr.net/gh/shammadahmed/assets@main/goblin.jpg",
-        "fallback_svg": "🎃",
-        "publisher": "Marvel", "sex": "Male Characters", "identity": "Secret Identity",
-        "alive": "Living Characters", "eye": "Blue Eyes", "hair": "Auburn Hair",
-        "appearances": 574, "year": 1964, "actual_align": "Bad Characters"
-    },
-    "magneto": {
-        "name": "Magneto (Max Eisenhardt)",
-        "universe": "Marvel Comics",
-        "img": "https://cdn.jsdelivr.net/gh/shammadahmed/assets@main/magneto.jpg",
-        "fallback_svg": "🧲",
-        "publisher": "Marvel", "sex": "Male Characters", "identity": "Public Identity",
-        "alive": "Living Characters", "eye": "Grey Eyes", "hair": "White Hair",
-        "appearances": 1408, "year": 1963, "actual_align": "Neutral Characters"
+        "img": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/52/Spider-Man.jpg/360px-Spider-Man.jpg",
+        "publisher": "Marvel", "sex": "Male", "identity": "Secret",
+        "alive": "Living", "eye": "Hazel", "hair": "Brown",
+        "appearances": 4043, "year": 1962, "actual_align": "Good Characters"
     },
     "thanos": {
         "name": "Thanos (The Mad Titan)",
         "universe": "Marvel Comics",
-        "img": "https://cdn.jsdelivr.net/gh/shammadahmed/assets@main/thanos.jpg",
-        "fallback_svg": "🧤",
-        "publisher": "Marvel", "sex": "Male Characters", "identity": "Public Identity",
-        "alive": "Deceased Characters", "eye": "Red Eyes", "hair": "No Hair",
+        "img": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/Gender-swapped_Thanos.jpg/360px-Gender-swapped_Thanos.jpg",
+        "publisher": "Marvel", "sex": "Male", "identity": "Public",
+        "alive": "Deceased", "eye": "Red", "hair": "Bald",
         "appearances": 330, "year": 1973, "actual_align": "Bad Characters"
+    },
+    "magneto": {
+        "name": "Magneto (Max Eisenhardt)",
+        "universe": "Marvel Comics",
+        "img": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/58/Wizard_World_Chicago_2014_-_Magneto_%2815049514681%29.jpg/360px-Wizard_World_Chicago_2014_-_Magneto_%2815049514681%29.jpg",
+        "publisher": "Marvel", "sex": "Male", "identity": "Public",
+        "alive": "Living", "eye": "Grey", "hair": "White",
+        "appearances": 1408, "year": 1963, "actual_align": "Neutral Characters"
     }
 }
 
 CLASSES = ['Bad Characters', 'Good Characters', 'Neutral Characters']
 
 # ---------------------------------------------------------
-# Neural Network Definition
+# Neural Network Architecture
 # ---------------------------------------------------------
-class VillainNet(nn.Module):
+class EnhancedVillainNet(nn.Module):
     def __init__(self, in_features, num_classes=3):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(in_features, 64),
-            nn.ReLU(),
+            nn.BatchNorm1d(64),
+            nn.LeakyReLU(0.1),
+            nn.Dropout(0.2),
             nn.Linear(64, 32),
-            nn.ReLU(),
+            nn.BatchNorm1d(32),
+            nn.LeakyReLU(0.1),
             nn.Linear(32, num_classes)
         )
 
@@ -164,9 +146,9 @@ class VillainNet(nn.Module):
         return self.net(x)
 
 # ---------------------------------------------------------
-# Robust Training Pipeline
+# Robust Training Pipeline (Expanded Categorical Top-N)
 # ---------------------------------------------------------
-@st.cache_resource(show_spinner="Training Neural Network on Comic Data...")
+@st.cache_resource(show_spinner="Training Neural Network on Comic Archives...")
 def load_and_train():
     dc = pd.read_csv("dc-wikia-data.csv")
     ml = pd.read_csv("marvel-wikia-data.csv")
@@ -179,7 +161,7 @@ def load_and_train():
     df = df[df['ALIGN'].isin(CLASSES)]
     df = df.drop(columns=['PAGE_ID', 'URLSLUG'], errors='ignore')
 
-    # Fixed regex: 'Characters' with 'a'
+    # Expanded category retention so villainous features (Green Hair, Bald, Red Eyes) are NOT lost
     def tidy(col, keep):
         s = df[col].fillna('Other').str.replace(' Characters| Eyes| Hair| Identity', '', regex=True)
         top_cats = s.value_counts().index[:keep]
@@ -187,11 +169,11 @@ def load_and_train():
 
     clean_df = pd.DataFrame({
         'publisher': df['PUBLISHER'],
-        'sex': tidy('SEX', 2),
-        'identity': tidy('ID', 3),
+        'sex': tidy('SEX', 3),
+        'identity': tidy('ID', 4),
         'alive': tidy('ALIVE', 2),
-        'eye': tidy('EYE', 5),
-        'hair': tidy('HAIR', 5)
+        'eye': tidy('EYE', 10),
+        'hair': tidy('HAIR', 10)
     })
 
     X = pd.get_dummies(clean_df, dtype=float)
@@ -215,12 +197,13 @@ def load_and_train():
     y_val_t = torch.tensor(y_val.values, dtype=torch.long)
 
     torch.manual_seed(42)
-    model = VillainNet(in_features=len(feature_cols))
+    model = EnhancedVillainNet(in_features=len(feature_cols))
 
+    # Weight balancing using square-root scaling
     counts = torch.bincount(y_train_t).float()
-    weights = counts.max() / counts
+    weights = torch.sqrt(counts.max() / counts)
     loss_fn = nn.CrossEntropyLoss(weight=weights)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.008)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.005, weight_decay=1e-4)
 
     best_val, best_state = float('inf'), None
     for _ in range(80):
@@ -249,17 +232,17 @@ if "selected_key" not in st.session_state:
 try:
     model, scaler, feature_cols, median_year = load_and_train()
 except Exception as e:
-    st.error(f"Dataset load error: {e}. Ensure `dc-wikia-data.csv` and `marvel-wikia-data.csv` exist.")
+    st.error(f"Dataset load error: {e}. Place `dc-wikia-data.csv` and `marvel-wikia-data.csv` in your root folder.")
     st.stop()
 
 # ---------------------------------------------------------
-# App Header
+# Header
 # ---------------------------------------------------------
 st.markdown('<div class="main-header">🥊 VILLAIN-NET ARENA</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Challenge the neural network against iconic heroes, anti-heroes, and supervillains.</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Challenge the neural network against real comic icons using ground-truth traits.</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Character Roster Selector
+# Real Character Image Selector
 # ---------------------------------------------------------
 st.markdown("#### 🌟 Select a Challenger")
 roster_cols = st.columns(len(ROSTER))
@@ -267,14 +250,14 @@ roster_cols = st.columns(len(ROSTER))
 for idx, (key, data) in enumerate(ROSTER.items()):
     with roster_cols[idx]:
         is_sel = (st.session_state.selected_key == key)
-        st.markdown(f"""
-        <div class="hero-card" style="border-color:{'#ff4b4b' if is_sel else '#30363d'};">
-            <div style="font-size: 2.2rem; margin-bottom: 6px;">{data['fallback_svg']}</div>
-            <div style="font-weight:700; font-size:0.9rem;">{data['name'].split(' (')[0]}</div>
-            <div style="color:#8b949e; font-size:0.75rem;">{data['universe']}</div>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("Select", key=f"sel_{key}", use_container_width=True, type="primary" if is_sel else "secondary"):
+        card_class = "character-card active" if is_sel else "character-card"
+        
+        st.markdown(f'<div class="{card_class}">', unsafe_allow_html=True)
+        st.image(data["img"], use_container_width=True)
+        st.markdown(f"**{data['name'].split(' (')[0]}**<br><span style='color:#8b949e;font-size:0.75rem;'>{data['universe']}</span>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        if st.button("Choose", key=f"sel_{key}", use_container_width=True, type="primary" if is_sel else "secondary"):
             st.session_state.selected_key = key
             st.rerun()
 
@@ -282,7 +265,7 @@ current = ROSTER[st.session_state.selected_key]
 st.write("---")
 
 # ---------------------------------------------------------
-# Profile & Execution
+# Input Form & Execution
 # ---------------------------------------------------------
 col_left, col_right = st.columns([1.1, 1.3], gap="large")
 
@@ -308,25 +291,21 @@ with col_left:
 
         c1, c2 = st.columns(2)
         with c1:
-            clean_sex = current["sex"].replace(" Characters", "")
-            sex = st.selectbox("Sex", ["Male", "Female", "Other"], index=["Male", "Female", "Other"].index(clean_sex if clean_sex in ["Male", "Female"] else "Other"))
-            
-            clean_id = current["identity"].replace(" Identity", "")
-            id_opts = ["Secret", "Public", "No Dual", "Other"]
-            identity = st.selectbox("Identity Type", id_opts, index=id_opts.index(clean_id if clean_id in id_opts else "Other"))
+            sex_opts = ["Male", "Female", "Other"]
+            sex = st.selectbox("Sex", sex_opts, index=sex_opts.index(current["sex"]) if current["sex"] in sex_opts else 2)
 
-            clean_alive = current["alive"].replace(" Characters", "")
+            id_opts = ["Secret", "Public", "No Dual", "Other"]
+            identity = st.selectbox("Identity Type", id_opts, index=id_opts.index(current["identity"]) if current["identity"] in id_opts else 3)
+
             alive_opts = ["Living", "Deceased", "Other"]
-            alive = st.selectbox("Vital Status", alive_opts, index=alive_opts.index(clean_alive if clean_alive in alive_opts else "Other"))
+            alive = st.selectbox("Vital Status", alive_opts, index=alive_opts.index(current["alive"]) if current["alive"] in alive_opts else 2)
 
         with c2:
-            clean_eye = current["eye"].replace(" Eyes", "")
-            eye_opts = ["Blue", "Brown", "Black", "Green", "Red", "Other"]
-            eye = st.selectbox("Eye Color", eye_opts, index=eye_opts.index(clean_eye if clean_eye in eye_opts else "Other"))
+            eye_opts = ["Blue", "Brown", "Black", "Green", "Red", "Hazel", "Grey", "Yellow", "Other"]
+            eye = st.selectbox("Eye Color", eye_opts, index=eye_opts.index(current["eye"]) if current["eye"] in eye_opts else len(eye_opts)-1)
 
-            clean_hair = current["hair"].replace(" Hair", "")
-            hair_opts = ["Black", "Brown", "Blond", "Red", "White", "Other"]
-            hair = st.selectbox("Hair Color", hair_opts, index=hair_opts.index(clean_hair if clean_hair in hair_opts else "Other"))
+            hair_opts = ["Black", "Brown", "Blond", "White", "Red", "Green", "Bald", "Auburn", "Other"]
+            hair = st.selectbox("Hair Color", hair_opts, index=hair_opts.index(current["hair"]) if current["hair"] in hair_opts else len(hair_opts)-1)
 
             appearances = st.number_input("Comic Appearances", min_value=1, max_value=6000, value=int(current["appearances"]))
             year = st.slider("Debut Year", 1935, 2026, int(current["year"]))
@@ -355,6 +334,7 @@ with col_right:
         scaled = scaler.transform(input_df)
         tensor_input = torch.tensor(scaled, dtype=torch.float32)
 
+        model.eval()
         with torch.no_grad():
             logits = model(tensor_input)
             probs = torch.softmax(logits, dim=1).numpy()[0]
@@ -413,7 +393,7 @@ with col_right:
         st.info("Select a challenger above, review their stats, and click **⚡ Run Neural Net Prediction**.")
 
 # ---------------------------------------------------------
-# Scorecard
+# Arena Scorecard
 # ---------------------------------------------------------
 if st.session_state.arena_tests:
     st.write("---")
