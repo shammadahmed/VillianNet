@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# Custom Styling
+# UI Styling
 # ---------------------------------------------------------
 st.markdown("""
 <style>
@@ -76,7 +76,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Calibrated Roster
+# Verified Roster
 # ---------------------------------------------------------
 ROSTER = {
     "joker": {
@@ -129,52 +129,67 @@ ROSTER = {
 CLASSES = ['Bad Characters', 'Good Characters', 'Neutral Characters']
 
 # ---------------------------------------------------------
-# Neural Network Architecture with Residual Connection
+# Neural Network with Residual Skip Connections
 # ---------------------------------------------------------
-class DeepVillainNet(nn.Module):
+class ResNetVillainNet(nn.Module):
     def __init__(self, in_features, num_classes=3):
         super().__init__()
         self.fc1 = nn.Linear(in_features, 128)
         self.bn1 = nn.BatchNorm1d(128)
-        self.drop1 = nn.Dropout(0.25)
-
-        self.fc2 = nn.Linear(128, 64)
-        self.bn2 = nn.BatchNorm1d(64)
-        self.drop2 = nn.Dropout(0.2)
-
-        self.fc3 = nn.Linear(64, 32)
-        self.bn3 = nn.BatchNorm1d(32)
-
-        self.out = nn.Linear(32, num_classes)
+        
+        self.fc2 = nn.Linear(128, 128)
+        self.bn2 = nn.BatchNorm1d(128)
+        
+        self.fc3 = nn.Linear(128, 64)
+        self.bn3 = nn.BatchNorm1d(64)
+        
+        self.head = nn.Linear(64, num_classes)
+        self.dropout = nn.Dropout(0.2)
 
     def forward(self, x):
-        h1 = self.drop1(F.leaky_relu(self.bn1(self.fc1(x)), 0.1))
-        h2 = self.drop2(F.leaky_relu(self.bn2(self.fc2(h1)), 0.1))
+        h1 = F.leaky_relu(self.bn1(self.fc1(x)), 0.1)
+        # Residual Block
+        h2 = F.leaky_relu(self.bn2(self.fc2(h1)), 0.1)
+        h2 = self.dropout(h2 + h1)
         h3 = F.leaky_relu(self.bn3(self.fc3(h2)), 0.1)
-        return self.out(h3)
+        return self.head(h3)
 
 # ---------------------------------------------------------
-# Multi-Class Focal Loss (Breaks the High-Appearance Hero Bias)
+# Preprocessing Engine
 # ---------------------------------------------------------
-class FocalLoss(nn.Module):
-    def __init__(self, alpha=None, gamma=2.0):
-        super().__init__()
-        self.alpha = alpha
-        self.gamma = gamma
+def process_data(df):
+    def tidy(col, keep):
+        s = df[col].fillna('Other').astype(str).str.strip()
+        top_cats = s.value_counts().index[:keep]
+        return s.where(s.isin(top_cats), 'Other')
 
-    def forward(self, inputs, targets):
-        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
-        pt = torch.exp(-ce_loss)
-        focal_loss = ((1.0 - pt) ** self.gamma) * ce_loss
-        if self.alpha is not None:
-            alpha_t = self.alpha[targets]
-            focal_loss = alpha_t * focal_loss
-        return focal_loss.mean()
+    raw = pd.DataFrame({
+        'publisher': df['PUBLISHER'],
+        'sex': tidy('SEX', 3),
+        'identity': tidy('ID', 4),
+        'alive': tidy('ALIVE', 2),
+        'eye': tidy('EYE', 14),
+        'hair': tidy('HAIR', 16)
+    })
+
+    X = pd.get_dummies(raw, dtype=float)
+    
+    # Nonlinear appearance tiers
+    apps = df['APPEARANCES'].fillna(1).values
+    X['tier_minor'] = (apps < 20).astype(float)
+    X['tier_recurring'] = ((apps >= 20) & (apps < 150)).astype(float)
+    X['tier_veteran'] = ((apps >= 150) & (apps < 800)).astype(float)
+    X['tier_flagship'] = (apps >= 800).astype(float)
+    X['appearance_log'] = np.log1p(apps)
+
+    median_year = float(df['YEAR'].median())
+    X['year'] = (df['YEAR'].fillna(median_year) - 1935) / 80.0
+    return X, median_year
 
 # ---------------------------------------------------------
-# Model Training
+# Training Engine
 # ---------------------------------------------------------
-@st.cache_resource(show_spinner="Training Calibrated Deep Neural Network...")
+@st.cache_resource(show_spinner="Training Calibrated Residual Neural Network...")
 def load_and_train():
     dc = pd.read_csv("dc-wikia-data.csv")
     ml = pd.read_csv("marvel-wikia-data.csv")
@@ -187,27 +202,9 @@ def load_and_train():
     df = df[df['ALIGN'].isin(CLASSES)]
     df = df.drop(columns=['PAGE_ID', 'URLSLUG'], errors='ignore')
 
-    def tidy(col, keep):
-        s = df[col].fillna('Other').astype(str).str.strip()
-        top_cats = s.value_counts().index[:keep]
-        return s.where(s.isin(top_cats), 'Other')
-
-    raw_features = pd.DataFrame({
-        'publisher': df['PUBLISHER'],
-        'sex': tidy('SEX', 3),
-        'identity': tidy('ID', 4),
-        'alive': tidy('ALIVE', 2),
-        'eye': tidy('EYE', 12),
-        'hair': tidy('HAIR', 16)
-    })
-
-    X = pd.get_dummies(raw_features, dtype=float)
-    X['appearance'] = np.log1p(df['APPEARANCES'].fillna(1))
-    median_year = float(df['YEAR'].median())
-    X['year'] = df['YEAR'].fillna(median_year)
-    y = df['ALIGN'].map({c: i for i, c in enumerate(CLASSES)})
-
+    X, median_year = process_data(df)
     feature_cols = list(X.columns)
+    y = df['ALIGN'].map({c: i for i, c in enumerate(CLASSES)})
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=42, stratify=y_train)
@@ -222,12 +219,12 @@ def load_and_train():
     y_val_t = torch.tensor(y_val.values, dtype=torch.long)
 
     torch.manual_seed(42)
-    model = DeepVillainNet(in_features=len(feature_cols))
+    model = ResNetVillainNet(in_features=len(feature_cols))
 
-    # Alpha balances class weights: [Bad: 1.25, Good: 1.0, Neutral: 2.2]
-    alpha = torch.tensor([1.25, 1.0, 2.2], dtype=torch.float32)
-    loss_fn = FocalLoss(alpha=alpha, gamma=2.0)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.006, weight_decay=1e-4)
+    # Weight balancing: offsets the majority bias
+    weights = torch.tensor([1.4, 1.0, 2.4], dtype=torch.float32)
+    loss_fn = nn.CrossEntropyLoss(weight=weights)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.005, weight_decay=1e-4)
 
     best_val, best_state = float('inf'), None
     for _ in range(85):
@@ -266,7 +263,7 @@ st.markdown('<div class="main-header">🥊 VILLAIN-NET ARENA</div>', unsafe_allo
 st.markdown('<div class="sub-header">Challenge the calibrated deep neural network against real comic icons.</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Roster Selection
+# Challenger Selection
 # ---------------------------------------------------------
 st.markdown("#### 🌟 Select a Challenger")
 roster_cols = st.columns(len(ROSTER))
@@ -297,7 +294,7 @@ current = ROSTER[st.session_state.selected_key]
 st.write("---")
 
 # ---------------------------------------------------------
-# Character Profile Form
+# Profile Form & Inference
 # ---------------------------------------------------------
 col_left, col_right = st.columns([1.1, 1.3], gap="large")
 
@@ -344,16 +341,19 @@ with col_left:
 
         predict_btn = st.form_submit_button("⚡ Run Neural Net Prediction", type="primary", use_container_width=True)
 
-# ---------------------------------------------------------
-# Inference & Results
-# ---------------------------------------------------------
 with col_right:
     st.markdown("### 📊 Classification Output")
 
     if predict_btn:
         input_df = pd.DataFrame(0.0, index=[0], columns=feature_cols)
-        input_df['appearance'] = np.log1p(appearances)
-        input_df['year'] = float(year)
+        
+        # Populate tiers
+        input_df['tier_minor'] = 1.0 if appearances < 20 else 0.0
+        input_df['tier_recurring'] = 1.0 if 20 <= appearances < 150 else 0.0
+        input_df['tier_veteran'] = 1.0 if 150 <= appearances < 800 else 0.0
+        input_df['tier_flagship'] = 1.0 if appearances >= 800 else 0.0
+        input_df['appearance_log'] = np.log1p(appearances)
+        input_df['year'] = (year - 1935) / 80.0
 
         feature_mappings = [
             ("publisher", publisher),
@@ -435,7 +435,7 @@ with col_right:
         st.info("Select a challenger above, review their stats, and click **⚡ Run Neural Net Prediction**.")
 
 # ---------------------------------------------------------
-# Scorecard
+# Arena Scorecard
 # ---------------------------------------------------------
 if st.session_state.arena_tests:
     st.write("---")
