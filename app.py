@@ -67,7 +67,7 @@ class VillainNet(nn.Module):
     def forward(self, x):
         return self.output(torch.relu(self.hidden(x)))
 
-CLASSES = ['Bad Characters', 'Good Characters', 'Neutral Characters']
+CLASSES = ['Bad Character', 'Good Character', 'Neutral Character']
 
 @st.cache_resource(show_spinner="Training VillainNet neural network...")
 def load_and_train():
