@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 import os
@@ -15,7 +16,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# Polished Neo-Comic UI Styling
+# Custom Styling
 # ---------------------------------------------------------
 st.markdown("""
 <style>
@@ -35,10 +36,9 @@ st.markdown("""
         font-size: 0.95rem;
         margin-bottom: 1.5rem;
     }
-    
-    /* Force uniform card image dimensions */
+
     [data-testid="stImage"] img {
-        height: 230px !important;
+        height: 220px !important;
         object-fit: cover !important;
         object-position: top center !important;
         border-radius: 8px !important;
@@ -76,7 +76,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Verified Roster with Exact Ground-Truth Demographics
+# Calibrated Roster
 # ---------------------------------------------------------
 ROSTER = {
     "joker": {
@@ -129,29 +129,52 @@ ROSTER = {
 CLASSES = ['Bad Characters', 'Good Characters', 'Neutral Characters']
 
 # ---------------------------------------------------------
-# Neural Network Architecture
+# Neural Network Architecture with Residual Connection
 # ---------------------------------------------------------
-class EnhancedVillainNet(nn.Module):
+class DeepVillainNet(nn.Module):
     def __init__(self, in_features, num_classes=3):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_features, 64),
-            nn.BatchNorm1d(64),
-            nn.LeakyReLU(0.1),
-            nn.Dropout(0.2),
-            nn.Linear(64, 32),
-            nn.BatchNorm1d(32),
-            nn.LeakyReLU(0.1),
-            nn.Linear(32, num_classes)
-        )
+        self.fc1 = nn.Linear(in_features, 128)
+        self.bn1 = nn.BatchNorm1d(128)
+        self.drop1 = nn.Dropout(0.25)
+
+        self.fc2 = nn.Linear(128, 64)
+        self.bn2 = nn.BatchNorm1d(64)
+        self.drop2 = nn.Dropout(0.2)
+
+        self.fc3 = nn.Linear(64, 32)
+        self.bn3 = nn.BatchNorm1d(32)
+
+        self.out = nn.Linear(32, num_classes)
 
     def forward(self, x):
-        return self.net(x)
+        h1 = self.drop1(F.leaky_relu(self.bn1(self.fc1(x)), 0.1))
+        h2 = self.drop2(F.leaky_relu(self.bn2(self.fc2(h1)), 0.1))
+        h3 = F.leaky_relu(self.bn3(self.fc3(h2)), 0.1)
+        return self.out(h3)
 
 # ---------------------------------------------------------
-# Data Pipeline & Calibrated Training Engine
+# Multi-Class Focal Loss (Breaks the High-Appearance Hero Bias)
 # ---------------------------------------------------------
-@st.cache_resource(show_spinner="Training Neural Network on Comic Archives...")
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=None, gamma=2.0):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+
+    def forward(self, inputs, targets):
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = ((1.0 - pt) ** self.gamma) * ce_loss
+        if self.alpha is not None:
+            alpha_t = self.alpha[targets]
+            focal_loss = alpha_t * focal_loss
+        return focal_loss.mean()
+
+# ---------------------------------------------------------
+# Model Training
+# ---------------------------------------------------------
+@st.cache_resource(show_spinner="Training Calibrated Deep Neural Network...")
 def load_and_train():
     dc = pd.read_csv("dc-wikia-data.csv")
     ml = pd.read_csv("marvel-wikia-data.csv")
@@ -164,7 +187,6 @@ def load_and_train():
     df = df[df['ALIGN'].isin(CLASSES)]
     df = df.drop(columns=['PAGE_ID', 'URLSLUG'], errors='ignore')
 
-    # Expanded category retention so Green Hair, Red Eyes, No Hair are preserved
     def tidy(col, keep):
         s = df[col].fillna('Other').astype(str).str.strip()
         top_cats = s.value_counts().index[:keep]
@@ -200,15 +222,15 @@ def load_and_train():
     y_val_t = torch.tensor(y_val.values, dtype=torch.long)
 
     torch.manual_seed(42)
-    model = EnhancedVillainNet(in_features=len(feature_cols))
+    model = DeepVillainNet(in_features=len(feature_cols))
 
-    # Calibrated class weights: prevents high appearances from biasing everything to Good
-    weights = torch.tensor([1.3, 1.0, 2.1])
-    loss_fn = nn.CrossEntropyLoss(weight=weights)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.005, weight_decay=1e-4)
+    # Alpha balances class weights: [Bad: 1.25, Good: 1.0, Neutral: 2.2]
+    alpha = torch.tensor([1.25, 1.0, 2.2], dtype=torch.float32)
+    loss_fn = FocalLoss(alpha=alpha, gamma=2.0)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.006, weight_decay=1e-4)
 
     best_val, best_state = float('inf'), None
-    for _ in range(80):
+    for _ in range(85):
         model.train()
         optimizer.zero_grad()
         loss = loss_fn(model(X_train_t), y_train_t)
@@ -234,17 +256,17 @@ if "selected_key" not in st.session_state:
 try:
     model, scaler, feature_cols, median_year = load_and_train()
 except Exception as e:
-    st.error(f"Dataset load error: {e}. Ensure `dc-wikia-data.csv` and `marvel-wikia-data.csv` are in the directory.")
+    st.error(f"Dataset load error: {e}. Place `dc-wikia-data.csv` and `marvel-wikia-data.csv` in your root folder.")
     st.stop()
 
 # ---------------------------------------------------------
 # UI Header
 # ---------------------------------------------------------
 st.markdown('<div class="main-header">🥊 VILLAIN-NET ARENA</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Challenge the deep neural network against real comic icons using ground-truth traits.</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Challenge the calibrated deep neural network against real comic icons.</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Character Roster Grid (Fixed Layout & Aligned Cards)
+# Roster Selection
 # ---------------------------------------------------------
 st.markdown("#### 🌟 Select a Challenger")
 roster_cols = st.columns(len(ROSTER))
@@ -252,7 +274,6 @@ roster_cols = st.columns(len(ROSTER))
 for idx, (key, data) in enumerate(ROSTER.items()):
     with roster_cols[idx]:
         is_sel = (st.session_state.selected_key == key)
-
         with st.container(border=True):
             img_src = data["local_img"] if os.path.exists(data["local_img"]) else data["remote_img"]
             try:
@@ -276,7 +297,7 @@ current = ROSTER[st.session_state.selected_key]
 st.write("---")
 
 # ---------------------------------------------------------
-# Profile Form & Inference
+# Character Profile Form
 # ---------------------------------------------------------
 col_left, col_right = st.columns([1.1, 1.3], gap="large")
 
@@ -315,7 +336,7 @@ with col_left:
             eye_opts = ["Blue Eyes", "Brown Eyes", "Black Eyes", "Green Eyes", "Red Eyes", "Hazel Eyes", "Grey Eyes", "Yellow Eyes", "Other"]
             eye = st.selectbox("Eye Color", eye_opts, index=eye_opts.index(current["eye"]) if current["eye"] in eye_opts else len(eye_opts)-1)
 
-            hair_opts = ["Black Hair", "Brown Hair", "Blonde Hair", "Blond Hair", "White Hair", "Red Hair", "Green Hair", "No Hair", "Bald", "Auburn Hair", "Other"]
+            hair_opts = ["Black Hair", "Brown Hair", "Blonde Hair", "Blond Hair", "White Hair", "Red Hair", "Green Hair", "No Hair", "Auburn Hair", "Other"]
             hair = st.selectbox("Hair Color", hair_opts, index=hair_opts.index(current["hair"]) if current["hair"] in hair_opts else len(hair_opts)-1)
 
             appearances = st.number_input("Comic Appearances", min_value=1, max_value=6000, value=int(current["appearances"]))
@@ -324,7 +345,7 @@ with col_left:
         predict_btn = st.form_submit_button("⚡ Run Neural Net Prediction", type="primary", use_container_width=True)
 
 # ---------------------------------------------------------
-# Robust Inference Execution
+# Inference & Results
 # ---------------------------------------------------------
 with col_right:
     st.markdown("### 📊 Classification Output")
@@ -334,7 +355,6 @@ with col_right:
         input_df['appearance'] = np.log1p(appearances)
         input_df['year'] = float(year)
 
-        # Set active features or fallback to 'Other' if absent
         feature_mappings = [
             ("publisher", publisher),
             ("sex", sex),
