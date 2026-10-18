@@ -6,10 +6,57 @@ import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 
-st.set_page_config(page_title="Comic Character Alignment Predictor", page_icon="🦸", layout="wide")
+st.set_page_config(
+    page_title="VillainNet | Comic Character Alignment AI",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
 # ---------------------------------------------------------
-# 1. Model Definition & Pipeline Setup
+# Custom Styling (Dark Neo-Comic Design)
+# ---------------------------------------------------------
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Bungee&family=Inter:wght@400;600;800&display=swap');
+
+    .main-header {
+        font-family: 'Bungee', cursive, sans-serif;
+        font-size: 2.2rem;
+        letter-spacing: 1px;
+        background: linear-gradient(90deg, #ff4b4b, #ffa116, #00d2ff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0.2rem;
+    }
+    .sub-header {
+        color: #94a3b8;
+        font-size: 0.95rem;
+        margin-bottom: 1.5rem;
+    }
+    .card {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+    .stat-badge {
+        display: inline-block;
+        padding: 6px 14px;
+        border-radius: 9999px;
+        font-weight: 700;
+        font-size: 0.85rem;
+        letter-spacing: 0.5px;
+    }
+    .badge-bad { background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid #ef4444; }
+    .badge-good { background: rgba(34, 197, 94, 0.18); color: #4ade80; border: 1px solid #22c55e; }
+    .badge-neutral { background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid #f59e0b; }
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# Model Definition & Data Engine
 # ---------------------------------------------------------
 class VillainNet(nn.Module):
     def __init__(self):
@@ -22,11 +69,10 @@ class VillainNet(nn.Module):
 
 CLASSES = ['Bad Characters', 'Good Characters', 'Neutral Characters']
 
-@st.cache_resource(show_spinner="Training VillainNet model...")
-def load_and_train(dc_path: str = "dc-wikia-data.csv", ml_path: str = "marvel-wikia-data.csv"):
-    # Load and concatenate datasets
-    dc = pd.read_csv(dc_path)
-    ml = pd.read_csv(ml_path)
+@st.cache_resource(show_spinner="Training VillainNet neural network...")
+def load_and_train():
+    dc = pd.read_csv("dc-wikia-data.csv")
+    ml = pd.read_csv("marvel-wikia-data.csv")
     
     for d in (dc, ml):
         d.columns = d.columns.str.upper()
@@ -36,7 +82,6 @@ def load_and_train(dc_path: str = "dc-wikia-data.csv", ml_path: str = "marvel-wi
     df = df[df['ALIGN'].isin(CLASSES)]
     df = df.drop(columns=['PAGE_ID', 'URLSLUG'], errors='ignore')
 
-    # Preprocessing helpers
     def tidy(col, keep):
         s = df[col].fillna('Unknown').str.replace(' Chracters| Eyes| Hair| Identity', '', regex=True)
         return s.where(s.isin(s.value_counts().index[:keep]), 'Other')
@@ -57,7 +102,6 @@ def load_and_train(dc_path: str = "dc-wikia-data.csv", ml_path: str = "marvel-wi
 
     feature_cols = list(X.columns)
 
-    # Train / Val / Test Splits
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=42, stratify=y_train)
 
@@ -70,7 +114,6 @@ def load_and_train(dc_path: str = "dc-wikia-data.csv", ml_path: str = "marvel-wi
     X_val_t = torch.tensor(X_val_scaled, dtype=torch.float32)
     y_val_t = torch.tensor(y_val.values, dtype=torch.long)
 
-    # Training
     torch.manual_seed(42)
     model = VillainNet()
     counts = torch.bincount(y_train_t).float()
@@ -100,57 +143,58 @@ def load_and_train(dc_path: str = "dc-wikia-data.csv", ml_path: str = "marvel-wi
 
     model.load_state_dict(best_state)
     model.eval()
-
     return model, scaler, feature_cols, median_year
 
-# ---------------------------------------------------------
-# 2. UI Layout
-# ---------------------------------------------------------
-st.title("🦸 Comic Character Alignment Predictor")
-st.markdown("Predict whether a comic character is **Good**, **Bad**, or **Neutral** based on physical traits and publishing attributes using the trained `VillainNet` model.")
-
-# File selection / Data source sidebar
-st.sidebar.header("Data Paths")
-dc_csv = st.sidebar.text_input("DC CSV Path", value="dc-wikia-data.csv")
-marvel_csv = st.sidebar.text_input("Marvel CSV Path", value="marvel-wikia-data.csv")
+if "history" not in st.session_state:
+    st.session_state.history = []
 
 try:
-    model, scaler, feature_cols, median_year = load_and_train(dc_csv, marvel_csv)
-    st.sidebar.success("Model loaded and cached successfully!")
+    model, scaler, feature_cols, median_year = load_and_train()
 except Exception as e:
-    st.error(f"Error loading datasets or training model: {e}")
-    st.info("Make sure `dc-wikia-data.csv` and `marvel-wikia-data.csv` are in the working directory or enter the valid file paths in the sidebar.")
+    st.error(f"Dataset loading error: {e}. Ensure `dc-wikia-data.csv` and `marvel-wikia-data.csv` are in your root folder.")
     st.stop()
 
-# Form Inputs
-col1, col2 = st.columns(2)
-
-with col1:
-    publisher = st.selectbox("Publisher", ["DC", "Marvel"])
-    sex = st.selectbox("Sex", ["Male Characters", "Female Characters", "Other"])
-    identity = st.selectbox("Identity", ["Secret Identity", "Public Identity", "No Dual Identity", "Other"])
-    alive = st.selectbox("Status", ["Living Characters", "Deceased Characters", "Other"])
-
-with col2:
-    eye = st.selectbox("Eye Color", ["Blue Eyes", "Brown Eyes", "Black Eyes", "Green Eyes", "Red Eyes", "Other"])
-    hair = st.selectbox("Hair Color", ["Black Hair", "Brown Hair", "Blonde Hair", "Red Hair", "White Hair", "Other"])
-    appearances = st.number_input("Appearances Count", min_value=1, max_value=5000, value=25, step=1)
-    year = st.number_input("First Appearance Year", min_value=1930, max_value=2026, value=int(median_year), step=1)
+# ---------------------------------------------------------
+# App Header
+# ---------------------------------------------------------
+st.markdown('<div class="main-header">⚡ VILLAIN-NET ANALYZER</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Deep Learning Character Alignment Predictor & Classification Engine</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 3. Inference
+# Layout Grid
 # ---------------------------------------------------------
-if st.button("Predict Alignment", type="primary"):
-    # Normalize string inputs to match notebook tidy rules
+col_left, col_right = st.columns([1.1, 1.3], gap="large")
+
+with col_left:
+    st.markdown("### 🧬 Character Profile")
+    with st.container(border=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            publisher = st.radio("Publisher", ["DC", "Marvel"], horizontal=True)
+            sex = st.selectbox("Sex", ["Male Characters", "Female Characters", "Other"])
+            identity = st.selectbox("Identity Type", ["Secret Identity", "Public Identity", "No Dual Identity", "Other"])
+            alive = st.selectbox("Vital Status", ["Living Characters", "Deceased Characters", "Other"])
+        with c2:
+            eye = st.selectbox("Eye Color", ["Blue Eyes", "Brown Eyes", "Black Eyes", "Green Eyes", "Red Eyes", "Other"])
+            hair = st.selectbox("Hair Color", ["Black Hair", "Brown Hair", "Blonde Hair", "Red Hair", "White Hair", "Other"])
+            appearances = st.number_input("Comic Appearances", min_value=1, max_value=6000, value=50, step=5)
+            year = st.slider("First Debuted (Year)", min_value=1935, max_value=2026, value=int(median_year))
+
+    predict_btn = st.button("⚡ Classify Alignment", type="primary", use_container_width=True)
+
+# ---------------------------------------------------------
+# Prediction & Inference
+# ---------------------------------------------------------
+with col_right:
+    st.markdown("### 📊 Classification Output")
+    
     clean_sex = sex.replace(" Characters", "")
     clean_id = identity.replace(" Identity", "")
     clean_alive = alive.replace(" Characters", "")
     clean_eye = eye.replace(" Eyes", "")
     clean_hair = hair.replace(" Hair", "")
 
-    # Construct one-hot feature vector matching trained columns exactly
     input_df = pd.DataFrame(0.0, index=[0], columns=feature_cols)
-
     input_df['appearance'] = np.log1p(appearances)
     input_df['year'] = float(year)
 
@@ -159,23 +203,66 @@ if st.button("Predict Alignment", type="primary"):
         if col in input_df.columns:
             input_df[col] = 1.0
 
-    # Scale and predict
-    scaled_features = scaler.transform(input_df)
-    tensor_input = torch.tensor(scaled_features, dtype=torch.float32)
+    scaled = scaler.transform(input_df)
+    tensor_input = torch.tensor(scaled, dtype=torch.float32)
 
     with torch.no_grad():
         logits = model(tensor_input)
         probs = torch.softmax(logits, dim=1).numpy()[0]
         pred_idx = int(torch.argmax(logits, dim=1).item())
 
-    pred_label = CLASSES[pred_idx]
+    pred_class = CLASSES[pred_idx]
+    badge_type = "badge-bad" if "Bad" in pred_class else ("badge-good" if "Good" in pred_class else "badge-neutral")
 
-    st.subheader(f"Prediction: **{pred_label}**")
-    
-    # Probability breakdown
-    prob_df = pd.DataFrame({
-        "Alignment": CLASSES,
-        "Probability": probs
-    }).set_index("Alignment")
+    # Record history when button is clicked
+    if predict_btn:
+        st.session_state.history.insert(0, {
+            "Publisher": publisher,
+            "Debuted": year,
+            "Appearances": appearances,
+            "Predicted": pred_class,
+            "Confidence": f"{probs[pred_idx] * 100:.1f}%"
+        })
 
-    st.bar_chart(prob_df)
+    with st.container(border=True):
+        st.markdown(f"""
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <span style="font-size:0.85rem; color:#8b949e; text-transform:uppercase;">Model Verdict</span>
+                    <h2 style="margin:4px 0 0 0;">{pred_class}</h2>
+                </div>
+                <div class="stat-badge {badge_type}">{probs[pred_idx]*100:.1f}% Confidence</div>
+            </div>
+            <hr style="border-color:#30363d; margin: 15px 0;">
+        """, unsafe_allow_html=True)
+
+        st.caption("Probability Distribution")
+        
+        # Sleek progress indicators
+        for label, prob, color in zip(CLASSES, probs, ["#ef4444", "#22c55e", "#f59e0b"]):
+            col_label, col_bar, col_pct = st.columns([1.2, 3, 0.8])
+            with col_label:
+                st.write(f"**{label.split()[0]}**")
+            with col_bar:
+                st.progress(float(prob))
+            with col_pct:
+                st.write(f"{prob * 100:.1f}%")
+
+# ---------------------------------------------------------
+# Prediction Log & Export
+# ---------------------------------------------------------
+if st.session_state.history:
+    st.write("---")
+    c_hist1, c_hist2 = st.columns([3, 1])
+    with c_hist1:
+        st.markdown("#### 📜 Session Prediction History")
+    with c_hist2:
+        hist_df = pd.DataFrame(st.session_state.history)
+        st.download_button(
+            label="📥 Export Predictions to CSV",
+            data=hist_df.to_csv(index=False).encode('utf-8'),
+            file_name="character_alignment_predictions.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    st.dataframe(hist_df, use_container_width=True, hide_index=True)
