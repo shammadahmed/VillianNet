@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# UI Styling
+# Clean Neo-Comic UI Styling
 # ---------------------------------------------------------
 st.markdown("""
 <style>
@@ -76,7 +76,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Verified Roster
+# Verified Challenger Roster
 # ---------------------------------------------------------
 ROSTER = {
     "joker": {
@@ -109,7 +109,7 @@ ROSTER = {
     "thanos": {
         "name": "Thanos (The Mad Titan)",
         "universe": "Marvel Comics",
-        "local_img": "assets/thanos.png",
+        "local_img": "assets/thanos.jpg",
         "remote_img": "https://upload.wikimedia.org/wikipedia/en/c/cd/Thanos_Infinity_4.png",
         "publisher": "Marvel", "sex": "Male Characters", "identity": "Public Identity",
         "alive": "Deceased Characters", "eye": "Red Eyes", "hair": "No Hair",
@@ -129,35 +129,34 @@ ROSTER = {
 CLASSES = ['Bad Characters', 'Good Characters', 'Neutral Characters']
 
 # ---------------------------------------------------------
-# Neural Network with Residual Skip Connections
+# Neural Network with Bounded Feature Representation
 # ---------------------------------------------------------
-class ResNetVillainNet(nn.Module):
+class DeepVillainNet(nn.Module):
     def __init__(self, in_features, num_classes=3):
         super().__init__()
         self.fc1 = nn.Linear(in_features, 128)
         self.bn1 = nn.BatchNorm1d(128)
-        
-        self.fc2 = nn.Linear(128, 128)
-        self.bn2 = nn.BatchNorm1d(128)
-        
-        self.fc3 = nn.Linear(128, 64)
-        self.bn3 = nn.BatchNorm1d(64)
-        
-        self.head = nn.Linear(64, num_classes)
+
+        self.fc2 = nn.Linear(128, 64)
+        self.bn2 = nn.BatchNorm1d(64)
+
+        self.fc3 = nn.Linear(64, 32)
+        self.bn3 = nn.BatchNorm1d(32)
+
+        self.out = nn.Linear(32, num_classes)
         self.dropout = nn.Dropout(0.2)
 
     def forward(self, x):
         h1 = F.leaky_relu(self.bn1(self.fc1(x)), 0.1)
-        # Residual Block
         h2 = F.leaky_relu(self.bn2(self.fc2(h1)), 0.1)
-        h2 = self.dropout(h2 + h1)
+        h2 = self.dropout(h2)
         h3 = F.leaky_relu(self.bn3(self.fc3(h2)), 0.1)
-        return self.head(h3)
+        return self.out(h3)
 
 # ---------------------------------------------------------
-# Preprocessing Engine
+# Feature Pipeline with Bounded Appearance Compression
 # ---------------------------------------------------------
-def process_data(df):
+def prepare_features(df):
     def tidy(col, keep):
         s = df[col].fillna('Other').astype(str).str.strip()
         top_cats = s.value_counts().index[:keep]
@@ -173,23 +172,29 @@ def process_data(df):
     })
 
     X = pd.get_dummies(raw, dtype=float)
-    
-    # Nonlinear appearance tiers
+
+    # 1. Bounded Appearance via Tanh Compression (Stops +4.5σ Outliers)
     apps = df['APPEARANCES'].fillna(1).values
-    X['tier_minor'] = (apps < 20).astype(float)
-    X['tier_recurring'] = ((apps >= 20) & (apps < 150)).astype(float)
-    X['tier_veteran'] = ((apps >= 150) & (apps < 800)).astype(float)
-    X['tier_flagship'] = (apps >= 800).astype(float)
-    X['appearance_log'] = np.log1p(apps)
+    X['app_bounded'] = np.tanh(np.log1p(apps) / 3.0)
+
+    # 2. Key Comic Domain Interaction Features
+    hair_series = df['HAIR'].fillna('').astype(str)
+    eye_series = df['EYE'].fillna('').astype(str)
+    id_series = df['ID'].fillna('').astype(str)
+
+    X['feat_green_hair'] = (hair_series == 'Green Hair').astype(float)
+    X['feat_red_yellow_eye'] = eye_series.isin(['Red Eyes', 'Yellow Eyes']).astype(float)
+    X['feat_grey_white_pub'] = ((hair_series == 'White Hair') & (id_series == 'Public Identity')).astype(float)
+    X['feat_no_hair_dead'] = ((hair_series == 'No Hair') & (df['ALIVE'] == 'Deceased Characters')).astype(float)
 
     median_year = float(df['YEAR'].median())
-    X['year'] = (df['YEAR'].fillna(median_year) - 1935) / 80.0
+    X['year_norm'] = (df['YEAR'].fillna(median_year) - 1935.0) / 80.0
     return X, median_year
 
 # ---------------------------------------------------------
-# Training Engine
+# Model Training Engine
 # ---------------------------------------------------------
-@st.cache_resource(show_spinner="Training Calibrated Residual Neural Network...")
+@st.cache_resource(show_spinner="Training Calibrated Deep Neural Network...")
 def load_and_train():
     dc = pd.read_csv("dc-wikia-data.csv")
     ml = pd.read_csv("marvel-wikia-data.csv")
@@ -202,7 +207,7 @@ def load_and_train():
     df = df[df['ALIGN'].isin(CLASSES)]
     df = df.drop(columns=['PAGE_ID', 'URLSLUG'], errors='ignore')
 
-    X, median_year = process_data(df)
+    X, median_year = prepare_features(df)
     feature_cols = list(X.columns)
     y = df['ALIGN'].map({c: i for i, c in enumerate(CLASSES)})
 
@@ -219,10 +224,10 @@ def load_and_train():
     y_val_t = torch.tensor(y_val.values, dtype=torch.long)
 
     torch.manual_seed(42)
-    model = ResNetVillainNet(in_features=len(feature_cols))
+    model = DeepVillainNet(in_features=len(feature_cols))
 
-    # Weight balancing: offsets the majority bias
-    weights = torch.tensor([1.4, 1.0, 2.4], dtype=torch.float32)
+    # Weight balancing: offsets majority bias (Neutral boosted to 3.2, Bad to 1.8)
+    weights = torch.tensor([1.8, 0.7, 3.2], dtype=torch.float32)
     loss_fn = nn.CrossEntropyLoss(weight=weights)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.005, weight_decay=1e-4)
 
@@ -263,7 +268,7 @@ st.markdown('<div class="main-header">🥊 VILLAIN-NET ARENA</div>', unsafe_allo
 st.markdown('<div class="sub-header">Challenge the calibrated deep neural network against real comic icons.</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Challenger Selection
+# Challenger Selection Grid
 # ---------------------------------------------------------
 st.markdown("#### 🌟 Select a Challenger")
 roster_cols = st.columns(len(ROSTER))
@@ -346,14 +351,16 @@ with col_right:
 
     if predict_btn:
         input_df = pd.DataFrame(0.0, index=[0], columns=feature_cols)
-        
-        # Populate tiers
-        input_df['tier_minor'] = 1.0 if appearances < 20 else 0.0
-        input_df['tier_recurring'] = 1.0 if 20 <= appearances < 150 else 0.0
-        input_df['tier_veteran'] = 1.0 if 150 <= appearances < 800 else 0.0
-        input_df['tier_flagship'] = 1.0 if appearances >= 800 else 0.0
-        input_df['appearance_log'] = np.log1p(appearances)
-        input_df['year'] = (year - 1935) / 80.0
+
+        # 1. Bounded Appearance & Year
+        input_df['app_bounded'] = np.tanh(np.log1p(appearances) / 3.0)
+        input_df['year_norm'] = (year - 1935.0) / 80.0
+
+        # 2. Key Domain Interaction Flags
+        input_df['feat_green_hair'] = 1.0 if hair == 'Green Hair' else 0.0
+        input_df['feat_red_yellow_eye'] = 1.0 if eye in ['Red Eyes', 'Yellow Eyes'] else 0.0
+        input_df['feat_grey_white_pub'] = 1.0 if (hair == 'White Hair' and identity == 'Public Identity') else 0.0
+        input_df['feat_no_hair_dead'] = 1.0 if (hair == 'No Hair' and alive == 'Deceased Characters') else 0.0
 
         feature_mappings = [
             ("publisher", publisher),
@@ -447,7 +454,7 @@ if st.session_state.arena_tests:
 
     m1, m2, m3 = st.columns(3)
     m1.metric("Characters Tested", total_tests)
-    m2.metric("Correct Predictions", correct_tests)
+    m1.metric("Correct Predictions", correct_tests)
     m3.metric("Arena Accuracy", f"{accuracy:.1f}%")
 
     st.dataframe(test_df, use_container_width=True, hide_index=True)
