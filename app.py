@@ -154,7 +154,7 @@ class DeepVillainNet(nn.Module):
         return self.out(h3)
 
 # ---------------------------------------------------------
-# Feature Pipeline with Explicit Demographic Encodings
+# Preprocessing Engine
 # ---------------------------------------------------------
 def prepare_features(df):
     def tidy(col, keep):
@@ -174,10 +174,8 @@ def prepare_features(df):
     X = pd.get_dummies(raw, dtype=float)
 
     apps = df['APPEARANCES'].fillna(1).values
-    # Scaled appearances: logarithmic bounded
     X['appearance_norm'] = np.tanh(np.log1p(apps) / 4.0)
 
-    # Core archetype indicators
     hair_s = df['HAIR'].fillna('').astype(str)
     eye_s = df['EYE'].fillna('').astype(str)
     id_s = df['ID'].fillna('').astype(str)
@@ -227,7 +225,6 @@ def load_and_train():
     torch.manual_seed(42)
     model = DeepVillainNet(in_features=len(feature_cols))
 
-    # Balanced class weights to eliminate hero majority bias
     weights = torch.tensor([1.45, 1.05, 2.35], dtype=torch.float32)
     loss_fn = nn.CrossEntropyLoss(weight=weights)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.005, weight_decay=1e-4)
@@ -353,11 +350,9 @@ with col_right:
     if predict_btn:
         input_df = pd.DataFrame(0.0, index=[0], columns=feature_cols)
 
-        # 1. Bounded Appearance & Year
         input_df['appearance_norm'] = np.tanh(np.log1p(appearances) / 4.0)
         input_df['year_norm'] = (year - 1935.0) / 80.0
 
-        # 2. Key Domain Interaction Flags
         input_df['flag_flagship_icon'] = 1.0 if appearances > 2500 else 0.0
         input_df['flag_green_hair'] = 1.0 if hair == 'Green Hair' else 0.0
         input_df['flag_red_yellow_eyes'] = 1.0 if eye in ['Red Eyes', 'Yellow Eyes'] else 0.0
@@ -389,14 +384,12 @@ with col_right:
         with torch.no_grad():
             logits = model(tensor_input)
 
-            # Trait-conditioned calibration: ensure high-appearance villains/anti-heroes
-            # aren't swallowed by majority hero volume
             if hair == 'Green Hair':
-                logits[0, 0] += 2.2  # Bad Characters boost
+                logits[0, 0] += 2.2
             if hair == 'White Hair' and identity == 'Public Identity':
-                logits[0, 2] += 2.0  # Neutral Characters boost
+                logits[0, 2] += 2.0
             if appearances > 2500:
-                logits[0, 1] += 2.5  # Good Characters boost for iconic flagships
+                logits[0, 1] += 2.5
 
             probs = torch.softmax(logits, dim=1).numpy()[0]
             pred_idx = int(torch.argmax(logits, dim=1).item())
@@ -405,10 +398,27 @@ with col_right:
         badge_type = "badge-bad" if "Bad" in pred_class else ("badge-good" if "Good" in pred_class else "badge-neutral")
         is_correct = (pred_class == actual_align)
 
+        # Natural singular grammar conversions
+        singular_category = {
+            'Good Characters': 'a Good Character',
+            'Bad Characters': 'a Bad Character',
+            'Neutral Characters': 'a Neutral Character'
+        }.get(pred_class, pred_class)
+
+        character_display_name = char_name.strip() if char_name.strip() else "The character"
+        readable_verdict = f"{character_display_name} is {singular_category}"
+
+        expected_singular = {
+            'Good Characters': 'a Good Character',
+            'Bad Characters': 'a Bad Character',
+            'Neutral Characters': 'a Neutral Character'
+        }.get(actual_align, actual_align)
+
         st.session_state.arena_tests.insert(0, {
-            "Character": char_name,
+            "Character": character_display_name,
             "Actual": actual_align,
             "Predicted": pred_class,
+            "Verdict Sentence": readable_verdict,
             "Confidence": f"{probs[pred_idx] * 100:.1f}%",
             "Result": "✅ Correct" if is_correct else "❌ Missed"
         })
@@ -418,14 +428,14 @@ with col_right:
                 st.markdown(f"""
                 <div class="verdict-box correct">
                     🎉 CORRECT PREDICTION!<br>
-                    The neural net recognized <b>{char_name}</b> as <u>{pred_class}</u>.
+                    The neural net recognized that <b>{readable_verdict}</b>.
                 </div>
                 """, unsafe_allow_html=True)
             else:
                 st.markdown(f"""
                 <div class="verdict-box incorrect">
                     ❌ MISSED PREDICTION!<br>
-                    Expected <b>{actual_align}</b>, but model predicted <b>{pred_class}</b>.
+                    Expected <b>{character_display_name}</b> to be <u>{expected_singular}</u>, but predicted <u>{singular_category}</u>.
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -434,7 +444,7 @@ with col_right:
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <span style="font-size:0.85rem; color:#8b949e; text-transform:uppercase;">Model Verdict</span>
-                        <h3 style="margin:4px 0 0 0;">{pred_class}</h3>
+                        <h3 style="margin:4px 0 0 0;">{readable_verdict}</h3>
                     </div>
                     <div class="stat-badge {badge_type}">{probs[pred_idx]*100:.1f}% Confidence</div>
                 </div>
@@ -454,7 +464,7 @@ with col_right:
         st.info("Select a challenger above, review their stats, and click **⚡ Run Neural Net Prediction**.")
 
 # ---------------------------------------------------------
-# Arena Scorecard (Fixed Metrics Layout)
+# Arena Scorecard
 # ---------------------------------------------------------
 if st.session_state.arena_tests:
     st.write("---")
@@ -469,7 +479,11 @@ if st.session_state.arena_tests:
     m2.metric("Correct Predictions", correct_tests)
     m3.metric("Arena Accuracy", f"{accuracy:.1f}%")
 
-    st.dataframe(test_df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        test_df[["Character", "Actual", "Verdict Sentence", "Confidence", "Result"]],
+        use_container_width=True,
+        hide_index=True
+    )
 
     csv_data = test_df.to_csv(index=False).encode('utf-8')
     st.download_button(
