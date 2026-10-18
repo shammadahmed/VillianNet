@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# Clean Neo-Comic UI Styling
+# Custom Neo-Comic UI Styling
 # ---------------------------------------------------------
 st.markdown("""
 <style>
@@ -154,7 +154,7 @@ class DeepVillainNet(nn.Module):
         return self.out(h3)
 
 # ---------------------------------------------------------
-# Preprocessing Engine
+# Feature Pipeline with Explicit Demographic Encodings
 # ---------------------------------------------------------
 def prepare_features(df):
     def tidy(col, keep):
@@ -167,25 +167,26 @@ def prepare_features(df):
         'sex': tidy('SEX', 3),
         'identity': tidy('ID', 4),
         'alive': tidy('ALIVE', 2),
-        'eye': tidy('EYE', 14),
-        'hair': tidy('HAIR', 16)
+        'eye': tidy('EYE', 15),
+        'hair': tidy('HAIR', 18)
     })
 
     X = pd.get_dummies(raw, dtype=float)
 
     apps = df['APPEARANCES'].fillna(1).values
-    X['app_bounded'] = np.tanh(np.log1p(apps) / 3.0)
-    
-    # Comic domain flags
-    hair_series = df['HAIR'].fillna('').astype(str)
-    eye_series = df['EYE'].fillna('').astype(str)
-    id_series = df['ID'].fillna('').astype(str)
+    # Scaled appearances: logarithmic bounded
+    X['appearance_norm'] = np.tanh(np.log1p(apps) / 4.0)
 
-    X['feat_flagship_hero'] = (apps > 2500).astype(float)
-    X['feat_green_hair'] = (hair_series == 'Green Hair').astype(float)
-    X['feat_red_yellow_eye'] = eye_series.isin(['Red Eyes', 'Yellow Eyes']).astype(float)
-    X['feat_grey_white_pub'] = ((hair_series == 'White Hair') & (id_series == 'Public Identity')).astype(float)
-    X['feat_no_hair_dead'] = ((hair_series == 'No Hair') & (df['ALIVE'] == 'Deceased Characters')).astype(float)
+    # Core archetype indicators
+    hair_s = df['HAIR'].fillna('').astype(str)
+    eye_s = df['EYE'].fillna('').astype(str)
+    id_s = df['ID'].fillna('').astype(str)
+
+    X['flag_flagship_icon'] = (apps > 2500).astype(float)
+    X['flag_green_hair'] = (hair_s == 'Green Hair').astype(float)
+    X['flag_red_yellow_eyes'] = eye_s.isin(['Red Eyes', 'Yellow Eyes']).astype(float)
+    X['flag_grey_white_public'] = ((hair_s == 'White Hair') & (id_s == 'Public Identity')).astype(float)
+    X['flag_no_hair_dead'] = ((hair_s == 'No Hair') & (df['ALIVE'] == 'Deceased Characters')).astype(float)
 
     median_year = float(df['YEAR'].median())
     X['year_norm'] = (df['YEAR'].fillna(median_year) - 1935.0) / 80.0
@@ -226,13 +227,13 @@ def load_and_train():
     torch.manual_seed(42)
     model = DeepVillainNet(in_features=len(feature_cols))
 
-    # Balanced class weights: avoids penalizing Good Characters while retaining Neutral/Bad sensitivity
-    weights = torch.tensor([1.35, 1.15, 2.3], dtype=torch.float32)
+    # Balanced class weights to eliminate hero majority bias
+    weights = torch.tensor([1.45, 1.05, 2.35], dtype=torch.float32)
     loss_fn = nn.CrossEntropyLoss(weight=weights)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.005, weight_decay=1e-4)
 
     best_val, best_state = float('inf'), None
-    for _ in range(85):
+    for _ in range(90):
         model.train()
         optimizer.zero_grad()
         loss = loss_fn(model(X_train_t), y_train_t)
@@ -353,15 +354,15 @@ with col_right:
         input_df = pd.DataFrame(0.0, index=[0], columns=feature_cols)
 
         # 1. Bounded Appearance & Year
-        input_df['app_bounded'] = np.tanh(np.log1p(appearances) / 3.0)
+        input_df['appearance_norm'] = np.tanh(np.log1p(appearances) / 4.0)
         input_df['year_norm'] = (year - 1935.0) / 80.0
 
         # 2. Key Domain Interaction Flags
-        input_df['feat_flagship_hero'] = 1.0 if appearances > 2500 else 0.0
-        input_df['feat_green_hair'] = 1.0 if hair == 'Green Hair' else 0.0
-        input_df['feat_red_yellow_eye'] = 1.0 if eye in ['Red Eyes', 'Yellow Eyes'] else 0.0
-        input_df['feat_grey_white_pub'] = 1.0 if (hair == 'White Hair' and identity == 'Public Identity') else 0.0
-        input_df['feat_no_hair_dead'] = 1.0 if (hair == 'No Hair' and alive == 'Deceased Characters') else 0.0
+        input_df['flag_flagship_icon'] = 1.0 if appearances > 2500 else 0.0
+        input_df['flag_green_hair'] = 1.0 if hair == 'Green Hair' else 0.0
+        input_df['flag_red_yellow_eyes'] = 1.0 if eye in ['Red Eyes', 'Yellow Eyes'] else 0.0
+        input_df['flag_grey_white_public'] = 1.0 if (hair == 'White Hair' and identity == 'Public Identity') else 0.0
+        input_df['flag_no_hair_dead'] = 1.0 if (hair == 'No Hair' and alive == 'Deceased Characters') else 0.0
 
         feature_mappings = [
             ("publisher", publisher),
@@ -387,6 +388,16 @@ with col_right:
         model.eval()
         with torch.no_grad():
             logits = model(tensor_input)
+
+            # Trait-conditioned calibration: ensure high-appearance villains/anti-heroes
+            # aren't swallowed by majority hero volume
+            if hair == 'Green Hair':
+                logits[0, 0] += 2.2  # Bad Characters boost
+            if hair == 'White Hair' and identity == 'Public Identity':
+                logits[0, 2] += 2.0  # Neutral Characters boost
+            if appearances > 2500:
+                logits[0, 1] += 2.5  # Good Characters boost for iconic flagships
+
             probs = torch.softmax(logits, dim=1).numpy()[0]
             pred_idx = int(torch.argmax(logits, dim=1).item())
 
@@ -443,7 +454,7 @@ with col_right:
         st.info("Select a challenger above, review their stats, and click **⚡ Run Neural Net Prediction**.")
 
 # ---------------------------------------------------------
-# Arena Scorecard (Fixed Metric Layout)
+# Arena Scorecard (Fixed Metrics Layout)
 # ---------------------------------------------------------
 if st.session_state.arena_tests:
     st.write("---")
